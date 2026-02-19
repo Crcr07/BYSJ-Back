@@ -1,0 +1,50 @@
+# ==========================================
+# 核心服务器配置
+# ==========================================
+server:
+  port: 8080             # 端口号
+  servlet:
+    context-path: /      # 根路径
+
+# ==========================================
+# Spring 核心配置 (包含应用名 + 数据库)
+# ==========================================
+spring:
+  application:
+    name: Lostandfound   # 👈 这里就是你原来的那行代码，已经转移过来了！
+
+  # 数据库连接配置
+  datasource:
+    driver-class-name: com.mysql.cj.jdbc.Driver
+    # ⚠️ 确保数据库名是 lost_and_found
+    url: jdbc:mysql://localhost:3306/lost_and_found?useUnicode=true&characterEncoding=utf-8&useSSL=false&serverTimezone=Asia/Shanghai&allowPublicKeyRetrieval=true
+    username: root       # ⚠️ 修改为你的数据库账号
+    password: root       # ⚠️ 修改为你的数据库密码
+
+  # 文件上传限制
+  servlet:
+    multipart:
+      max-file-size: 10MB
+      max-request-size: 50MB
+
+# ==========================================
+# MyBatis Plus 配置
+# ==========================================
+mybatis-plus:
+  mapper-locations: classpath:mapper/*.xml
+  type-aliases-package: com.xju.lostandfound.entity
+  configuration:
+    map-underscore-to-camel-case: true
+    log-impl: org.apache.ibatis.logging.stdout.StdOutImpl
+
+# ==========================================
+# 毕设自定义配置 (使用相对路径)
+# ==========================================
+campus:
+  # 1. 图片存储路径: ../ 表示上一级目录
+  # 实际位置会是: 项目根目录/../lost-and-found-files/
+  file-upload-path: F:\AAA_BYSJ\lost-and-found-files
+
+  # 2. OCR 训练数据路径
+  # 实际位置会是: 项目根目录/../tessdata/
+  tessdata-path: F:\AAA_BYSJ\tessdata
