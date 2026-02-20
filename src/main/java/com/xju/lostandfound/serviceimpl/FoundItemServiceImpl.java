@@ -62,9 +62,23 @@ public class FoundItemServiceImpl extends ServiceImpl<FoundItemMapper, FoundItem
         foundItem.setCreateTime(LocalDateTime.now());
         foundItem.setStatus(0);
 
+        // 提取图片文字和特征
         if (uploadedFile != null && uploadedFile.exists()) {
-            foundItem.setOcrText(ocrUtils.doOcr(uploadedFile));
-            foundItem.setImageFeature(ImageFeatureUtils.getImageFingerprint(uploadedFile));
+            String text = ocrUtils.doOcr(uploadedFile);
+            String feature = ImageFeatureUtils.getImageFingerprint(uploadedFile);
+
+            System.out.println("====== 毕设算法调试日志 ======");
+            System.out.println("文件绝对路径: " + uploadedFile.getAbsolutePath());
+            System.out.println("OCR 识别结果: [" + text + "]");
+            System.out.println("图像特征指纹: [" + feature + "]");
+            System.out.println("============================");
+
+            // 存入实体类 (如果为空字符串，我们也存进去，方便排查)
+            foundItem.setOcrText(text == null ? "" : text);
+            foundItem.setImageFeature(feature == null ? "" : feature);
+
+        } else {
+            System.out.println("【警告】系统找不到上传的图片文件！");
         }
 
         // ==========================================

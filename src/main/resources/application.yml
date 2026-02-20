@@ -43,8 +43,8 @@ mybatis-plus:
 campus:
   # 1. 图片存储路径: ../ 表示上一级目录
   # 实际位置会是: 项目根目录/../lost-and-found-files/
-  file-upload-path: F:\AAA_BYSJ\lost-and-found-files
+  file-upload-path: F:\AAA_BYSJ\lost-and-found-files\
 
   # 2. OCR 训练数据路径
   # 实际位置会是: 项目根目录/../tessdata/
-  tessdata-path: F:\AAA_BYSJ\tessdata
+  tessdata-path: F:\AAA_BYSJ\tessdata\

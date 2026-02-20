@@ -1,45 +1,86 @@
 package com.xju.lostandfound.controller;
 
+import com.baomidou.mybatisplus.core.conditions.query.QueryWrapper;
+import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
 import com.xju.lostandfound.common.result.Result;
 import com.xju.lostandfound.common.utils.JwtUtils;
+import com.xju.lostandfound.entity.LostItem;
+import com.xju.lostandfound.model.dto.PageQueryDto;
 import com.xju.lostandfound.model.dto.PublishItemDto;
 import com.xju.lostandfound.service.LostItemService;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.web.bind.annotation.*;
 
-@RestController // 🌟 必须有这个，Spring 才会把它当成接口类
-@RequestMapping("/item/lost") // 🌟 必须有这个，映射前缀路径
+@RestController
+@RequestMapping("/item/lost")
 public class LostItemController {
 
+    // 🌟 解决报错的关键：必须把 Service 注入进来
     @Autowired
     private LostItemService lostItemService;
 
     /**
-     * 发布失物接口
+     * 发布失物
      * POST /item/lost/publish
      */
-    @PostMapping("/publish") // 🌟 必须有这个，映射具体路径
+    @PostMapping("/publish")
     public Result<String> publish(PublishItemDto dto, @RequestHeader(value = "token", required = false) String token) {
-
-        // 1. 简单的登录校验
         if (token == null || token.trim().isEmpty()) {
-            return Result.error(401, "请求头缺少 token，请先登录");
+            return Result.error(401, "请先登录");
         }
         String username = JwtUtils.getClaimsByToken(token);
         if (username == null) {
-            return Result.error(401, "Token 无效或已过期，请重新登录");
+            return Result.error(401, "Token无效或已过期");
         }
 
-        // 2. 模拟获取当前登录用户的 ID (实际应从数据库查)
         Long currentUserId = 1000L;
-
-        // 3. 调用 Service 执行发布逻辑
         boolean success = lostItemService.publish(dto, currentUserId);
 
         if (success) {
             return Result.success("发布成功");
         } else {
-            return Result.error(500, "发布失败，请检查服务器日志");
+            return Result.error("发布失败");
         }
+    }
+
+    /**
+     * 分页查询失物列表
+     * GET /item/lost/list
+     */
+    @GetMapping("/list")
+    public Result<Page<LostItem>> list(PageQueryDto queryDto) {
+        // 1. 构造分页对象
+        Page<LostItem> page = new Page<>(queryDto.getCurrent(), queryDto.getSize());
+
+        // 2. 构造查询条件
+        QueryWrapper<LostItem> wrapper = new QueryWrapper<>();
+
+        // 只查处于“寻找中(0)”状态的物品，按照时间倒序排
+        wrapper.eq("status", 0).orderByDesc("create_time");
+
+        // 关键词搜索
+        if (queryDto.getKeyword() != null && !queryDto.getKeyword().trim().isEmpty()) {
+            wrapper.and(w -> w.like("item_name", queryDto.getKeyword())
+                    .or()
+                    .like("description", queryDto.getKeyword()));
+        }
+
+        // 分类筛选
+        if (queryDto.getCategoryId() != null) {
+            wrapper.eq("category_id", queryDto.getCategoryId());
+        }
+
+        // 3. 执行查询 (这里就不会报错了，因为上面注入了 lostItemService)
+        Page<LostItem> result = lostItemService.page(page, wrapper);
+
+        // 4. 清除冗长且敏感的特征数据，不返回给前端
+        if (result.getRecords() != null) {
+            for (LostItem item : result.getRecords()) {
+                item.setOcrText(null);
+                item.setImageFeature(null);
+            }
+        }
+
+        return Result.success(result);
     }
 }

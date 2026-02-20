@@ -65,8 +65,21 @@ public class LostItemServiceImpl extends ServiceImpl<LostItemMapper, LostItem> i
 
         // 提取图片文字和特征
         if (uploadedFile != null && uploadedFile.exists()) {
-            lostItem.setOcrText(ocrUtils.doOcr(uploadedFile));
-            lostItem.setImageFeature(ImageFeatureUtils.getImageFingerprint(uploadedFile));
+            String text = ocrUtils.doOcr(uploadedFile);
+            String feature = ImageFeatureUtils.getImageFingerprint(uploadedFile);
+
+            System.out.println("====== 毕设算法调试日志 ======");
+            System.out.println("文件绝对路径: " + uploadedFile.getAbsolutePath());
+            System.out.println("OCR 识别结果: [" + text + "]");
+            System.out.println("图像特征指纹: [" + feature + "]");
+            System.out.println("============================");
+
+            // 存入实体类 (如果为空字符串，我们也存进去，方便排查)
+            lostItem.setOcrText(text == null ? "" : text);
+            lostItem.setImageFeature(feature == null ? "" : feature);
+
+        } else {
+            System.out.println("【警告】系统找不到上传的图片文件！");
         }
 
         // ==========================================
