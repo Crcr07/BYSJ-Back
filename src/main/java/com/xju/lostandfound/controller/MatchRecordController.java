@@ -1,7 +1,7 @@
 package com.xju.lostandfound.controller;
 
 import com.xju.lostandfound.common.result.Result;
-import com.xju.lostandfound.common.utils.JwtUtils;
+// import com.xju.lostandfound.common.utils.JwtUtils; // 暂时不用
 import com.xju.lostandfound.model.vo.MatchRecordVo;
 import com.xju.lostandfound.service.MatchRecordService;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -23,7 +23,7 @@ public class MatchRecordController {
     @GetMapping("/my-list")
     public Result<List<MatchRecordVo>> myList(@RequestHeader(value = "token", required = false) String token) {
 
-        // 简单鉴权
+        /* 💡 暂时注释掉鉴权逻辑，为了让前端不登录也能看到效果
         if (token == null || token.trim().isEmpty()) {
             return Result.error(401, "请先登录");
         }
@@ -31,17 +31,14 @@ public class MatchRecordController {
         if (username == null) {
             return Result.error(401, "Token无效或已过期");
         }
+        */
 
-        // 🌟 之前我们发失物用的 1000L，发招领用的 1001L。
-        // 这里写死 1000L 代表模拟“失主”登录进来查看。
+        // 模拟当前登录用户 1000L (张三)
         Long currentUserId = 1000L;
 
         List<MatchRecordVo> list = matchRecordService.getMatchListByUserId(currentUserId);
-
         return Result.success(list);
     }
-
-    // ... 前面的 myList 方法保持不变 ...
 
     /**
      * 确认认领
@@ -50,18 +47,11 @@ public class MatchRecordController {
     @PostMapping("/confirm/{recordId}")
     public Result<String> confirmMatch(@PathVariable Long recordId, @RequestHeader(value = "token", required = false) String token) {
 
-        if (token == null || token.trim().isEmpty()) {
-            return Result.error(401, "请先登录");
-        }
-        String username = JwtUtils.getClaimsByToken(token);
-        if (username == null) {
-            return Result.error(401, "Token无效或已过期");
-        }
+        /* 💡 同样暂时注释掉鉴权逻辑
+        if (token == null || token.trim().isEmpty()) { ... }
+        */
 
-        // 模拟当前登录用户
         Long currentUserId = 1000L;
-
-        // 调用带事务的 Service 方法
         boolean success = matchRecordService.confirmMatch(recordId, currentUserId);
 
         if (success) {
@@ -70,5 +60,4 @@ public class MatchRecordController {
             return Result.error("确认失败，该匹配记录可能不存在或已被处理。");
         }
     }
-
 }
