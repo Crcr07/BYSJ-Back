@@ -6,7 +6,7 @@ import com.xju.lostandfound.model.vo.MatchRecordVo;
 import com.xju.lostandfound.service.MatchRecordService;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.web.bind.annotation.*;
-
+import com.xju.lostandfound.common.utils.JwtUtils;
 import java.util.List;
 
 @RestController
@@ -22,19 +22,16 @@ public class MatchRecordController {
      */
     @GetMapping("/my-list")
     public Result<List<MatchRecordVo>> myList(@RequestHeader(value = "token", required = false) String token) {
-
-        /* 💡 暂时注释掉鉴权逻辑，为了让前端不登录也能看到效果
         if (token == null || token.trim().isEmpty()) {
             return Result.error(401, "请先登录");
         }
-        String username = JwtUtils.getClaimsByToken(token);
-        if (username == null) {
+        String userIdStr = JwtUtils.getClaimsByToken(token);
+        if (userIdStr == null) {
             return Result.error(401, "Token无效或已过期");
         }
-        */
 
-        // 模拟当前登录用户 1000L (张三)
-        Long currentUserId = 1000L;
+        // 🌟 提取真实用户 ID
+        Long currentUserId = Long.parseLong(userIdStr);
 
         List<MatchRecordVo> list = matchRecordService.getMatchListByUserId(currentUserId);
         return Result.success(list);
@@ -46,12 +43,17 @@ public class MatchRecordController {
      */
     @PostMapping("/confirm/{recordId}")
     public Result<String> confirmMatch(@PathVariable Long recordId, @RequestHeader(value = "token", required = false) String token) {
+        if (token == null || token.trim().isEmpty()) {
+            return Result.error(401, "请先登录");
+        }
+        String userIdStr = JwtUtils.getClaimsByToken(token);
+        if (userIdStr == null) {
+            return Result.error(401, "Token无效或已过期");
+        }
 
-        /* 💡 同样暂时注释掉鉴权逻辑
-        if (token == null || token.trim().isEmpty()) { ... }
-        */
+        // 🌟 提取真实用户 ID
+        Long currentUserId = Long.parseLong(userIdStr);
 
-        Long currentUserId = 1000L;
         boolean success = matchRecordService.confirmMatch(recordId, currentUserId);
 
         if (success) {

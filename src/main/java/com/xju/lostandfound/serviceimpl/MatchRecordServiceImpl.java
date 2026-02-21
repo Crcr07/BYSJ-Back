@@ -1,5 +1,8 @@
 package com.xju.lostandfound.serviceimpl;
 
+import com.xju.lostandfound.service.CreditRecordService;
+import org.springframework.context.annotation.Lazy;
+import com.xju.lostandfound.entity.User;
 import com.baomidou.mybatisplus.core.conditions.query.QueryWrapper;
 import com.baomidou.mybatisplus.extension.service.impl.ServiceImpl;
 import com.xju.lostandfound.entity.FoundItem;
@@ -9,8 +12,7 @@ import com.xju.lostandfound.mapper.FoundItemMapper;
 import com.xju.lostandfound.mapper.LostItemMapper;
 import com.xju.lostandfound.mapper.MatchRecordMapper;
 import com.xju.lostandfound.model.vo.MatchRecordVo;
-import com.xju.lostandfound.service.MatchAlgorithmService;
-import com.xju.lostandfound.service.MatchRecordService;
+import com.xju.lostandfound.service.*;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
 
@@ -19,8 +21,25 @@ import java.util.ArrayList;
 import java.util.List;
 import org.springframework.transaction.annotation.Transactional;
 
+
 @Service
 public class MatchRecordServiceImpl extends ServiceImpl<MatchRecordMapper, MatchRecord> implements MatchRecordService {
+
+    @Autowired
+    private UserService userService;
+
+    // 🌟 重点查这里：必须要有下面这三行代码！
+    @Autowired
+    @Lazy
+    private CreditRecordService creditRecordService;
+
+    @Autowired
+    @Lazy  // 🌟 核心修复：加上延迟加载注解，打破死循环
+    private LostItemService lostItemService;
+
+    @Autowired
+    @Lazy  // 🌟 核心修复：加上延迟加载注解
+    private FoundItemService foundItemService;
 
     @Autowired
     private LostItemMapper lostItemMapper;
@@ -123,31 +142,48 @@ public class MatchRecordServiceImpl extends ServiceImpl<MatchRecordMapper, Match
 
     // ==========================================
     // 🌟 确认认领逻辑 (带事务控制)
-    // ==========================================
+    // =========================================
+
     @Override
-    @Transactional(rollbackFor = Exception.class) // 开启事务，如果中途报错，三张表的数据全部回滚，保证数据一致性
-    public boolean confirmMatch(Long recordId, Long userId) {
-        // 1. 查出这条匹配记录
+    @Transactional(rollbackFor = Exception.class) // 🌟 开启数据库事务，同生共死！
+    public boolean confirmMatch(Long recordId, Long currentUserId) {
+        // 1. 查询匹配记录
         MatchRecord record = this.getById(recordId);
         if (record == null || record.getStatus() != 0) {
-            return false; // 记录不存在，或者已经不是待确认状态了
+            return false; // 记录不存在或已被处理
         }
 
-        // 2. 将这条匹配记录的状态改为 1 (已确认匹配)
+        // 2. 更新匹配记录状态为 1 (已确认)
         record.setStatus(1);
         this.updateById(record);
 
-        // 3. 将对应的失物状态改为 1 (已找回)
-        LostItem lostItem = new LostItem();
-        lostItem.setId(record.getLostId());
-        lostItem.setStatus(1);
-        lostItemMapper.updateById(lostItem);
+        // 3. 获取对应的失物和招领物品
+        Long lostItemId = record.getLostId();    // 🌟 去掉 Item，改成 getLostId()
+        Long foundItemId = record.getFoundId();  // 🌟 去掉 Item，改成 getFoundId()
 
-        // 4. 将对应的招领物品状态改为 1 (已认领)
-        FoundItem foundItem = new FoundItem();
-        foundItem.setId(record.getFoundId());
-        foundItem.setStatus(1);
-        foundItemMapper.updateById(foundItem);
+        // 4. 更新失物状态为已找回 (status = 1)
+        LostItem lostItem = lostItemService.getById(lostItemId);
+        if (lostItem != null) {
+            lostItem.setStatus(1);
+            lostItemService.updateById(lostItem);
+        }
+
+        // 5. 更新招领物品状态为已认领 (status = 1)
+        FoundItem foundItem = foundItemService.getById(foundItemId);
+        if (foundItem != null) {
+            foundItem.setStatus(1);
+            foundItemService.updateById(foundItem);
+
+            // ================= 🌟 核心加分逻辑开始 =================
+            // 6. 给拾金不昧的好心人加 10 分！
+            Long finderUserId = foundItem.getUserId(); // 获取捡到东西的人的 ID
+
+            // 防刷分机制：如果捡到东西的人就是丢东西的人自己，则不加分
+            if (!finderUserId.equals(currentUserId)) {
+                // 🚀 直接调用封装好的方法：加 10 分，并写入流水原因！
+                creditRecordService.changeUserCredit(finderUserId, 10, "拾金不昧：成功归还失物");
+            }
+            // ================= 🌟 核心加分逻辑结束 =================
 
         return true;
     }

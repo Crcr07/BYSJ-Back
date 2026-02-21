@@ -18,21 +18,30 @@ public class FoundItemController {
     @Autowired
     private FoundItemService foundItemService;
 
+
+
     /**
      * 发布招领
      * POST /item/found/publish
      */
     @PostMapping("/publish")
     public Result<String> publish(PublishItemDto dto, @RequestHeader(value = "token", required = false) String token) {
+
+        // 1. 恢复 Token 校验
         if (token == null || token.trim().isEmpty()) {
             return Result.error(401, "请先登录");
         }
-        String username = JwtUtils.getClaimsByToken(token);
-        if (username == null) {
+
+        // 2. 解析 Token
+        String userIdStr = JwtUtils.getClaimsByToken(token);
+        if (userIdStr == null) {
             return Result.error(401, "Token无效或已过期");
         }
 
-        Long currentUserId = 1001L;
+        // 3. 转换为真实用户 ID
+        Long currentUserId = Long.parseLong(userIdStr);
+
+        // 4. 使用真实的 ID 进行发布
         boolean success = foundItemService.publish(dto, currentUserId);
 
         return success ? Result.success("发布招领成功") : Result.error("发布失败");

@@ -19,21 +19,33 @@ public class LostItemController {
     @Autowired
     private LostItemService lostItemService;
 
+
+    /**
+     * 发布失物
+     * POST /item/lost/publish
+     */
     /**
      * 发布失物
      * POST /item/lost/publish
      */
     @PostMapping("/publish")
     public Result<String> publish(PublishItemDto dto, @RequestHeader(value = "token", required = false) String token) {
+
+        // 1. 恢复 Token 校验
         if (token == null || token.trim().isEmpty()) {
             return Result.error(401, "请先登录");
         }
-        String username = JwtUtils.getClaimsByToken(token);
-        if (username == null) {
+
+        // 2. 解析 Token，获取里面存放的真实用户 ID (String格式)
+        String userIdStr = JwtUtils.getClaimsByToken(token);
+        if (userIdStr == null) {
             return Result.error(401, "Token无效或已过期");
         }
 
-        Long currentUserId = 1000L;
+        // 3. 将 String 类型的 ID 转换为 Long 类型
+        Long currentUserId = Long.parseLong(userIdStr);
+
+        // 4. 使用真实的 ID 进行发布
         boolean success = lostItemService.publish(dto, currentUserId);
 
         if (success) {
