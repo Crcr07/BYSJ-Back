@@ -184,8 +184,10 @@ public class MatchRecordServiceImpl extends ServiceImpl<MatchRecordMapper, Match
                 creditRecordService.changeUserCredit(finderUserId, 10, "拾金不昧：成功归还失物");
             }
             // ================= 🌟 核心加分逻辑结束 =================
+        } // 🌟 修复：补上这个大括号，用来闭合 if (foundItem != null)
 
         return true;
-    }
-}
+    } // 闭合 confirmMatch 方法
+} // 闭合 MatchRecordServiceImpl 类
+
 
