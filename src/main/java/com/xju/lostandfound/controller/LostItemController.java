@@ -11,6 +11,8 @@ import com.xju.lostandfound.service.LostItemService;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.web.bind.annotation.*;
 
+import java.util.List;
+
 @RestController
 @RequestMapping("/item/lost")
 public class LostItemController {
@@ -19,11 +21,6 @@ public class LostItemController {
     @Autowired
     private LostItemService lostItemService;
 
-
-    /**
-     * 发布失物
-     * POST /item/lost/publish
-     */
     /**
      * 发布失物
      * POST /item/lost/publish
@@ -94,5 +91,36 @@ public class LostItemController {
         }
 
         return Result.success(result);
+    }
+
+    // ================== 我的发布专属接口 ==================
+
+    // 1. 查询当前用户发布的所有“失物”
+    @GetMapping("/my")
+    public Result<List<LostItem>> getMyLostItems(@RequestHeader(value = "token", required = false) String token) {
+        if (token == null) return Result.error(401, "未登录");
+        Long userId = Long.parseLong(JwtUtils.getClaimsByToken(token));
+        QueryWrapper<LostItem> wrapper = new QueryWrapper<>();
+        wrapper.eq("user_id", userId).orderByDesc("create_time");
+        return Result.success(lostItemService.list(wrapper));
+    }
+
+    // 2. 标记失物为“已找回/下架”
+    @PutMapping("/my/resolve/{id}")
+    public Result<String> resolveMyLostItem(@PathVariable Long id) {
+        LostItem item = lostItemService.getById(id);
+        if (item != null) {
+            item.setStatus(1); // 1表示已找回或已解决
+            lostItemService.updateById(item);
+        }
+        return Result.success("状态已更新为：已找回");
+    }
+
+    // 3. 彻底删除该失物记录
+    @DeleteMapping("/my/{id}")
+    public Result<String> deleteMyLostItem(@PathVariable Long id) {
+        lostItemService.removeById(id);
+        // 注意：企业级开发中通常还会级联删除对应的 match_record 记录，这里为了简化先只删主表
+        return Result.success("删除成功");
     }
 }

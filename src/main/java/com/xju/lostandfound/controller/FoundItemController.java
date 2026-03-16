@@ -11,6 +11,8 @@ import com.xju.lostandfound.service.FoundItemService;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.web.bind.annotation.*;
 
+import java.util.List;
+
 @RestController
 @RequestMapping("/item/found")
 public class FoundItemController {
@@ -78,5 +80,35 @@ public class FoundItemController {
         }
 
         return Result.success(result);
+    }
+
+    // ================== 我的发布专属接口 ==================
+
+    // 1. 查询当前用户发布的所有“招领”
+    @GetMapping("/my")
+    public Result<List<FoundItem>> getMyFoundItems(@RequestHeader(value = "token", required = false) String token) {
+        if (token == null) return Result.error(401, "未登录");
+        Long userId = Long.parseLong(JwtUtils.getClaimsByToken(token));
+        QueryWrapper<FoundItem> wrapper = new QueryWrapper<>();
+        wrapper.eq("user_id", userId).orderByDesc("create_time");
+        return Result.success(foundItemService.list(wrapper));
+    }
+
+    // 2. 标记招领为“已认领/下架”
+    @PutMapping("/my/resolve/{id}")
+    public Result<String> resolveMyFoundItem(@PathVariable Long id) {
+        FoundItem item = foundItemService.getById(id);
+        if (item != null) {
+            item.setStatus(1); // 1表示已认领或已解决
+            foundItemService.updateById(item);
+        }
+        return Result.success("状态已更新为：已完成");
+    }
+
+    // 3. 彻底删除该招领记录
+    @DeleteMapping("/my/{id}")
+    public Result<String> deleteMyFoundItem(@PathVariable Long id) {
+        foundItemService.removeById(id);
+        return Result.success("删除成功");
     }
 }
