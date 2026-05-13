@@ -2,6 +2,7 @@ package com.xju.lostandfound.service;
 
 import com.xju.lostandfound.entity.FoundItem;
 import com.xju.lostandfound.entity.LostItem;
+import com.xju.lostandfound.entity.MatchRecord; // 新增导入
 
 /**
  * 智能匹配算法服务接口
@@ -9,11 +10,7 @@ import com.xju.lostandfound.entity.LostItem;
 public interface MatchAlgorithmService {
 
     /**
-     * 计算 失物 和 招领物品 之间的综合匹配得分
-     *
-     * @param lostItem  失物对象
-     * @param foundItem 招领物品对象
-     * @return 匹配得分 (范围: 0.0 到 1.0，越接近 1.0 越匹配)
+     * 计算失物和招领物品之间的综合匹配度，调用大模型工作流返回带有详细结果的匹配记录对象
      */
-    double calculateMatchScore(LostItem lostItem, FoundItem foundItem);
+    MatchRecord calculateMatchScore(LostItem lostItem, FoundItem foundItem);
 }

@@ -1,101 +1,101 @@
+
 package com.xju.lostandfound.serviceimpl;
 
-import com.xju.lostandfound.common.utils.ImageFeatureUtils;
+import com.alibaba.fastjson2.JSON;
+import com.alibaba.fastjson2.JSONObject;
 import com.xju.lostandfound.entity.FoundItem;
 import com.xju.lostandfound.entity.LostItem;
+import com.xju.lostandfound.entity.MatchRecord;
+import com.xju.lostandfound.model.dto.CozeMatchResultDto;
 import com.xju.lostandfound.service.MatchAlgorithmService;
+import lombok.extern.slf4j.Slf4j;
+import org.springframework.beans.factory.annotation.Value;
+import org.springframework.http.*;
 import org.springframework.stereotype.Service;
+import org.springframework.web.client.RestTemplate;
 
-import java.util.HashSet;
-import java.util.Set;
+import java.math.BigDecimal;
+import java.time.LocalDateTime;
+import java.util.HashMap;
+import java.util.Map;
 
 @Service
+@Slf4j
 public class MatchAlgorithmServiceImpl implements MatchAlgorithmService {
 
-    // 默认权重配置：图像特征占 60%，OCR文本占 40%
-    private static final double WEIGHT_IMAGE = 0.6;
-    private static final double WEIGHT_TEXT = 0.4;
+    @Value("${coze.api.url}")
+    private String apiUrl;
+
+    @Value("${coze.api.token}")
+    private String apiToken;
+
+    @Value("${coze.workflow.id}")
+    private String workflowId;
+
+    private final RestTemplate restTemplate;
+
+    public MatchAlgorithmServiceImpl(RestTemplate restTemplate) {
+        this.restTemplate = restTemplate;
+    }
 
     @Override
-    public double calculateMatchScore(LostItem lostItem, FoundItem foundItem) {
-        if (lostItem == null || foundItem == null) {
-            return 0.0;
-        }
+    public MatchRecord calculateMatchScore(LostItem lostItem, FoundItem foundItem) {
+        Map<String, Object> parameters = new HashMap<>();
+        // 此处的键名需严格对应你 Coze 工作流“起始节点”定义的参数名
+        parameters.put("lost_item_info", buildItemMap(lostItem));
+        parameters.put("found_item_info", buildItemMap(foundItem));
 
-        // 1. 计算图像特征相似度
-        double imageScore = 0.0;
-        boolean hasImage = isValidString(lostItem.getImageFeature()) && isValidString(foundItem.getImageFeature());
-        if (hasImage) {
-            imageScore = ImageFeatureUtils.calculateSimilarity(lostItem.getImageFeature(), foundItem.getImageFeature());
-        }
+        Map<String, Object> requestBody = new HashMap<>();
+        requestBody.put("workflow_id", workflowId);
+        requestBody.put("parameters", parameters);
 
-        // 2. 计算 OCR 文本特征相似度 (使用 Jaccard 相似度)
-        double textScore = 0.0;
-        boolean hasText = isValidString(lostItem.getOcrText()) && isValidString(foundItem.getOcrText());
-        if (hasText) {
-            textScore = calculateTextSimilarity(lostItem.getOcrText(), foundItem.getOcrText());
-        }
+        HttpHeaders headers = new HttpHeaders();
+        headers.setContentType(MediaType.APPLICATION_JSON);
+        headers.set("Authorization", "Bearer " + apiToken);
 
-        // 3. 动态权重计算总得分
-        if (hasImage && hasText) {
-            // 图文都有，按照设定的比例加权
-            return (imageScore * WEIGHT_IMAGE) + (textScore * WEIGHT_TEXT);
-        } else if (hasImage) {
-            // 只有图片，完全依赖图像相似度
-            return imageScore;
-        } else if (hasText) {
-            // 只有文本，完全依赖文本相似度
-            return textScore;
-        }
+        HttpEntity<Map<String, Object>> request = new HttpEntity<>(requestBody, headers);
 
-        // 都没有，匹配度为0
-        return 0.0;
-    }
-
-    /**
-     * 计算文本相似度 (Jaccard 相似度算法实现)
-     * 公式: 交集数量 / 并集数量
-     */
-    private double calculateTextSimilarity(String text1, String text2) {
-        // 将文本拆分为单字集合 (针对中文优化)
-        Set<Character> set1 = toCharSet(text1);
-        Set<Character> set2 = toCharSet(text2);
-
-        if (set1.isEmpty() || set2.isEmpty()) {
-            return 0.0;
-        }
-
-        // 计算交集
-        Set<Character> intersection = new HashSet<>(set1);
-        intersection.retainAll(set2);
-
-        // 计算并集
-        Set<Character> union = new HashSet<>(set1);
-        union.addAll(set2);
-
-        // 返回 Jaccard 指数
-        return (double) intersection.size() / union.size();
-    }
-
-    /**
-     * 辅助方法：将字符串转为字符集合（去除空格）
-     */
-    private Set<Character> toCharSet(String str) {
-        Set<Character> set = new HashSet<>();
-        if (str != null) {
-            for (char c : str.toCharArray()) {
-                if (!Character.isWhitespace(c)) {
-                    set.add(c);
-                }
+        try {
+            ResponseEntity<String> response = restTemplate.postForEntity(apiUrl, request, String.class);
+            if (response.getStatusCode() == HttpStatus.OK) {
+                return parseCozeResponse(response.getBody(), lostItem.getId(), foundItem.getId());
             }
+        } catch (Exception e) {
+            log.error("调用大模型工作流异常", e);
         }
-        return set;
+        return null;
     }
 
-    /**
-     * 辅助方法：判空
-     */
-    private boolean isValidString(String str) {
-        return str != null && !str.trim().isEmpty();
+    private MatchRecord parseCozeResponse(String responseBody, Long lostId, Long foundId) {
+        JSONObject jsonObject = JSON.parseObject(responseBody);
+        if (jsonObject.getIntValue("code") == 0) {
+            // 取出 Coze 实际返回的业务 JSON 字符串
+            String dataStr = jsonObject.getString("data");
+            CozeMatchResultDto resultDto = JSON.parseObject(dataStr, CozeMatchResultDto.class);
+
+            MatchRecord record = new MatchRecord();
+            record.setLostId(lostId);
+            record.setFoundId(foundId);
+
+            // 【关键修改点 1】：使用 Double.parseDouble 替代 BigDecimal
+            record.setMatchScore(Double.parseDouble(resultDto.getOutput()) * 100);
+
+            record.setMatchReason(resultDto.getReason());
+            record.setMatchedFields(resultDto.getMatchedFields());
+            record.setRiskLevel(resultDto.getRiskLevel());
+            record.setCreateTime(LocalDateTime.now());
+
+            // 【关键修改点 2】：阈值判断也使用 Double
+            if (Double.parseDouble(resultDto.getOutput()) >= 0.7) {
+                record.setStatus(0);
+            }
+
+            return record;
+        }
+        return null;
+    }
+
+    private Map<String, Object> buildItemMap(Object item) {
+        return JSON.parseObject(JSON.toJSONString(item), Map.class);
     }
 }

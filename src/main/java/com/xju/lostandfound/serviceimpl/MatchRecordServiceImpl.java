@@ -50,8 +50,7 @@ public class MatchRecordServiceImpl extends ServiceImpl<MatchRecordMapper, Match
     @Autowired
     private MatchAlgorithmService matchAlgorithmService;
 
-    // 设定匹配及格线：匹配度大于 60% 才认为是疑似物品
-    private static final double THRESHOLD = 0.6;
+    // 注意：原本的 THRESHOLD 常量已经被删除，因为大模型匹配的及格线阈值判定已经在 MatchAlgorithmServiceImpl 内部完成
 
     @Override
     public void matchAfterLostPublished(LostItem lostItem) {
@@ -62,10 +61,13 @@ public class MatchRecordServiceImpl extends ServiceImpl<MatchRecordMapper, Match
         System.out.println("【系统触发自动匹配】新发布了失物，正在扫描 " + foundItems.size() + " 条招领信息...");
 
         for (FoundItem foundItem : foundItems) {
-            double score = matchAlgorithmService.calculateMatchScore(lostItem, foundItem);
-            if (score >= THRESHOLD) {
-                saveRecord(lostItem.getId(), foundItem.getId(), score);
-                System.out.println("💡 发现高度匹配物品！失物ID:" + lostItem.getId() + " 招领ID:" + foundItem.getId() + " 得分:" + (score * 100) + "%");
+            // 【重构核心】：接收大模型工作流返回的完整 MatchRecord 对象
+            MatchRecord record = matchAlgorithmService.calculateMatchScore(lostItem, foundItem);
+
+            // 如果记录不为空，并且大模型判定的得分达到了阈值(状态在之前已被设为0代表待确认)，则存入数据库
+            if (record != null && record.getStatus() != null && record.getStatus() == 0) {
+                this.save(record);
+                System.out.println("💡 发现高度匹配物品！失物ID:" + lostItem.getId() + " 招领ID:" + foundItem.getId());
             }
         }
     }
@@ -79,24 +81,18 @@ public class MatchRecordServiceImpl extends ServiceImpl<MatchRecordMapper, Match
         System.out.println("【系统触发自动匹配】新发布了招领，正在扫描 " + lostItems.size() + " 条失物信息...");
 
         for (LostItem lostItem : lostItems) {
-            double score = matchAlgorithmService.calculateMatchScore(lostItem, foundItem);
-            if (score >= THRESHOLD) {
-                saveRecord(lostItem.getId(), foundItem.getId(), score);
-                System.out.println("💡 发现高度匹配物品！招领ID:" + foundItem.getId() + " 失物ID:" + lostItem.getId() + " 得分:" + (score * 100) + "%");
+            // 【重构核心】：接收大模型工作流返回的完整 MatchRecord 对象
+            MatchRecord record = matchAlgorithmService.calculateMatchScore(lostItem, foundItem);
+
+            if (record != null && record.getStatus() != null && record.getStatus() == 0) {
+                this.save(record);
+                System.out.println("💡 发现高度匹配物品！招领ID:" + foundItem.getId() + " 失物ID:" + lostItem.getId());
             }
         }
     }
 
-    // 辅助方法：存入数据库
-    private void saveRecord(Long lostId, Long foundId, double score) {
-        MatchRecord record = new MatchRecord();
-        record.setLostId(lostId);
-        record.setFoundId(foundId);
-        record.setMatchScore(score);
-        record.setStatus(0); // 待用户确认
-        record.setCreateTime(LocalDateTime.now());
-        this.save(record);
-    }
+    // 注意：原本旧的私有方法 saveRecord(Long lostId, Long foundId, double score) 已经被删除，
+    // 因为 Coze 返回的记录已经是拼装好的对象，直接使用 this.save(record) 保存。
 
     // ==========================================
     // 🌟 查询我的匹配记录 (彻底解决冲突的方法)
@@ -189,5 +185,3 @@ public class MatchRecordServiceImpl extends ServiceImpl<MatchRecordMapper, Match
         return true;
     } // 闭合 confirmMatch 方法
 } // 闭合 MatchRecordServiceImpl 类
-
-

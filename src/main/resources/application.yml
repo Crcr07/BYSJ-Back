@@ -48,3 +48,18 @@ campus:
   # 2. OCR 训练数据路径
   # 实际位置会是: 项目根目录/../tessdata/
   tessdata-path: F:\AAA_BYSJ\tessdata\
+
+  # 文件路径：src/main/resources/application.yml
+coze:
+  api:
+    url: https://api.coze.cn/v1/workflow/run
+    token: pat_Opbm0cMEpdAEfEjbCVZc1Ygvshfffgc94vkMf5SGrPNJ191hBpnzEbVAMKP2T6w8  # 请替换为你在 Coze 平台申请的真实 token
+  workflow:
+    id: 7593804157171564554                 # 请替换为你真实的工作流 ID
+
+#  coze:
+#    api:
+#      url: https://api.coze.cn/v1/workflow/run
+#      token: cztei_lCalocKk78f1vtTb3J1d5SxBCcSXkroFNAfI2ACgxE4lHN0JPuctWwC42CKNEEFr7
+#    workflow:
+#      id: 7593804157171564554
