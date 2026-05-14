@@ -18,4 +18,8 @@ public class MatchRecordVo {
 
     private LostItem lostItem;     // 关联的失物详细信息
     private FoundItem foundItem;   // 关联的招领详细信息
+
+    private String matchReason;
+    private String matchedFields;
+    private String riskLevel;
 }

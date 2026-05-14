@@ -119,6 +119,9 @@ public class MatchRecordServiceImpl extends ServiceImpl<MatchRecordMapper, Match
                     vo.setMatchScore(record.getMatchScore());
                     vo.setStatus(record.getStatus());
                     vo.setCreateTime(record.getCreateTime());
+                    vo.setMatchReason(record.getMatchReason());
+                    vo.setMatchedFields(record.getMatchedFields());
+                    vo.setRiskLevel(record.getRiskLevel());
 
                     // 安全起见，清空敏感冗长的算法特征，不传给前端
                     lostItem.setOcrText(null);

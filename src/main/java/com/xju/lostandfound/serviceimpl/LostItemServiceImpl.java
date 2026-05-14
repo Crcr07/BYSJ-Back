@@ -1,6 +1,7 @@
 package com.xju.lostandfound.serviceimpl;
 
 import com.baomidou.mybatisplus.extension.service.impl.ServiceImpl;
+import com.xju.lostandfound.common.utils.AliOssUtil; // 🌟 注入 OSS 工具类
 import com.xju.lostandfound.common.utils.FileUtils;
 import com.xju.lostandfound.common.utils.ImageFeatureUtils;
 import com.xju.lostandfound.common.utils.OcrUtils;
@@ -17,6 +18,9 @@ import java.io.File;
 import java.time.LocalDateTime;
 import java.time.format.DateTimeFormatter;
 
+/**
+ * 失物业务实现类 - 已修复文件上传顺序问题
+ */
 @Service
 public class LostItemServiceImpl extends ServiceImpl<LostItemMapper, LostItem> implements LostItemService {
 
@@ -26,20 +30,17 @@ public class LostItemServiceImpl extends ServiceImpl<LostItemMapper, LostItem> i
     @Autowired
     private OcrUtils ocrUtils;
 
-    // 🌟 注入刚刚写好的智能匹配服务
     @Autowired
     private MatchRecordService matchRecordService;
+
+    @Autowired
+    private AliOssUtil aliOssUtil; // 🌟 注入阿里云 OSS 工具类
 
     @Override
     public boolean publish(PublishItemDto dto, Long userId) {
         String fileName = null;
         File uploadedFile = null;
-
-        if (dto.getFile() != null && !dto.getFile().isEmpty()) {
-            fileName = FileUtils.upload(dto.getFile(), uploadPath);
-            // 确保获取的是绝对路径下的文件对象
-            uploadedFile = new File(new File(uploadPath).getAbsoluteFile(), fileName);
-        }
+        String ossUrl = null;
 
         LostItem lostItem = new LostItem();
         lostItem.setUserId(userId);
@@ -47,8 +48,27 @@ public class LostItemServiceImpl extends ServiceImpl<LostItemMapper, LostItem> i
         lostItem.setCategoryId(dto.getCategoryId());
         lostItem.setLostLocation(dto.getLocation());
         lostItem.setDescription(dto.getDescription());
-        lostItem.setImageUrl(fileName);
 
+        // ============================================================
+        // 🌟 修复核心逻辑：调换上传顺序，解决 NoSuchFileException
+        // ============================================================
+        if (dto.getFile() != null && !dto.getFile().isEmpty()) {
+            // 1. 先进行 OSS 上传：此操作通过 getInputStream() 读取流，不会移动或销毁临时文件
+            try {
+                ossUrl = aliOssUtil.upload(dto.getFile());
+                lostItem.setImageUrl(ossUrl); // 将 OSS 返回的完整 URL 存入数据库
+            } catch (Exception e) {
+                // 捕获日志中的上传失败异常
+                throw new RuntimeException("文件上传至阿里云OSS失败", e);
+            }
+
+            // 2. OSS 成功后，再调用 FileUtils 保存到本地副本：用于 OCR 和特征提取
+            // 注意：FileUtils.upload 内部调用 transferTo，之后 Tomcat 的临时文件会被销毁
+            fileName = FileUtils.upload(dto.getFile(), uploadPath);
+            uploadedFile = new File(new File(uploadPath).getAbsoluteFile(), fileName);
+        }
+
+        // 处理丢失时间格式
         if (dto.getDate() != null && !dto.getDate().isEmpty()) {
             try {
                 DateTimeFormatter df = DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm:ss");
@@ -63,7 +83,7 @@ public class LostItemServiceImpl extends ServiceImpl<LostItemMapper, LostItem> i
         lostItem.setCreateTime(LocalDateTime.now());
         lostItem.setStatus(0);
 
-        // 提取图片文字和特征
+        // 提取图片文字和特征 (基于本地保存的副本进行 AI 处理)
         if (uploadedFile != null && uploadedFile.exists()) {
             String text = ocrUtils.doOcr(uploadedFile);
             String feature = ImageFeatureUtils.getImageFingerprint(uploadedFile);
@@ -74,20 +94,15 @@ public class LostItemServiceImpl extends ServiceImpl<LostItemMapper, LostItem> i
             System.out.println("图像特征指纹: [" + feature + "]");
             System.out.println("============================");
 
-            // 存入实体类 (如果为空字符串，我们也存进去，方便排查)
             lostItem.setOcrText(text == null ? "" : text);
             lostItem.setImageFeature(feature == null ? "" : feature);
-
-        } else {
-            System.out.println("【警告】系统找不到上传的图片文件！");
         }
 
         // ==========================================
-        // 🌟 核心：保存并触发匹配
+        // 🌟 核心：保存数据库记录并触发智能匹配
         // ==========================================
         boolean isSaved = this.save(lostItem);
         if (isSaved) {
-            // 这里传入的是 lostItem (失物对象)
             matchRecordService.matchAfterLostPublished(lostItem);
         }
 

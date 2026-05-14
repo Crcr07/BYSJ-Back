@@ -1,4 +1,3 @@
-
 package com.xju.lostandfound.serviceimpl;
 
 import com.alibaba.fastjson2.JSON;
@@ -14,7 +13,6 @@ import org.springframework.http.*;
 import org.springframework.stereotype.Service;
 import org.springframework.web.client.RestTemplate;
 
-import java.math.BigDecimal;
 import java.time.LocalDateTime;
 import java.util.HashMap;
 import java.util.Map;
@@ -41,9 +39,10 @@ public class MatchAlgorithmServiceImpl implements MatchAlgorithmService {
     @Override
     public MatchRecord calculateMatchScore(LostItem lostItem, FoundItem foundItem) {
         Map<String, Object> parameters = new HashMap<>();
-        // 此处的键名需严格对应你 Coze 工作流“起始节点”定义的参数名
-        parameters.put("lost_item_info", buildItemMap(lostItem));
-        parameters.put("found_item_info", buildItemMap(foundItem));
+
+        // 🌟 关键修改点 1：这里的参数名必须严格叫做 lostItem 和 foundItem
+        parameters.put("lostItem", buildLostItemMap(lostItem));
+        parameters.put("foundItem", buildFoundItemMap(foundItem));
 
         Map<String, Object> requestBody = new HashMap<>();
         requestBody.put("workflow_id", workflowId);
@@ -55,13 +54,17 @@ public class MatchAlgorithmServiceImpl implements MatchAlgorithmService {
 
         HttpEntity<Map<String, Object>> request = new HttpEntity<>(requestBody, headers);
 
+        System.out.println("\n⏳ 正在请求 Coze 大模型进行比对: 招领 [" + foundItem.getItemName() + "] VS 失物 [" + lostItem.getItemName() + "]");
+
         try {
             ResponseEntity<String> response = restTemplate.postForEntity(apiUrl, request, String.class);
             if (response.getStatusCode() == HttpStatus.OK) {
                 return parseCozeResponse(response.getBody(), lostItem.getId(), foundItem.getId());
+            } else {
+                System.out.println("❌ Coze 接口 HTTP 状态码异常: " + response.getStatusCode());
             }
         } catch (Exception e) {
-            log.error("调用大模型工作流异常", e);
+            log.error("❌ 调用大模型工作流异常", e);
         }
         return null;
     }
@@ -69,7 +72,6 @@ public class MatchAlgorithmServiceImpl implements MatchAlgorithmService {
     private MatchRecord parseCozeResponse(String responseBody, Long lostId, Long foundId) {
         JSONObject jsonObject = JSON.parseObject(responseBody);
         if (jsonObject.getIntValue("code") == 0) {
-            // 取出 Coze 实际返回的业务 JSON 字符串
             String dataStr = jsonObject.getString("data");
             CozeMatchResultDto resultDto = JSON.parseObject(dataStr, CozeMatchResultDto.class);
 
@@ -77,25 +79,55 @@ public class MatchAlgorithmServiceImpl implements MatchAlgorithmService {
             record.setLostId(lostId);
             record.setFoundId(foundId);
 
-            // 【关键修改点 1】：使用 Double.parseDouble 替代 BigDecimal
-            record.setMatchScore(Double.parseDouble(resultDto.getOutput()) * 100);
+            double score = Double.parseDouble(resultDto.getOutput());
+            record.setMatchScore(score * 100);
 
             record.setMatchReason(resultDto.getReason());
             record.setMatchedFields(resultDto.getMatchedFields());
             record.setRiskLevel(resultDto.getRiskLevel());
             record.setCreateTime(LocalDateTime.now());
 
-            // 【关键修改点 2】：阈值判断也使用 Double
-            if (Double.parseDouble(resultDto.getOutput()) >= 0.7) {
+            System.out.println("📊 大模型判定得分: " + score + " | 理由: " + resultDto.getReason());
+
+            if (score >= 0.7) {
                 record.setStatus(0);
+                System.out.println("🎉 得分 >= 0.7，匹配达标！系统已生成匹配记录。\n");
+            } else {
+                System.out.println("📉 得分低于阈值 0.7，系统判定为不匹配，过滤丢弃。\n");
             }
 
             return record;
+        } else {
+            System.out.println("❌ Coze 业务级报错: " + jsonObject.getString("msg"));
         }
         return null;
     }
 
-    private Map<String, Object> buildItemMap(Object item) {
-        return JSON.parseObject(JSON.toJSONString(item), Map.class);
+    // ==========================================
+    // 🌟 关键修改点 2：将实体类精准转换为 Coze 要求的 7个 String 字段
+    // ==========================================
+
+    private Map<String, String> buildLostItemMap(LostItem item) {
+        Map<String, String> map = new HashMap<>();
+        map.put("name", item.getItemName() != null ? item.getItemName() : "");
+        map.put("category", item.getCategoryId() != null ? String.valueOf(item.getCategoryId()) : "");
+        map.put("ocrText", item.getOcrText() != null ? item.getOcrText() : "");
+        map.put("imageUrl", item.getImageUrl() != null ? item.getImageUrl() : "");
+        map.put("location", item.getLostLocation() != null ? item.getLostLocation() : "");
+        map.put("time", item.getLostTime() != null ? item.getLostTime().toString() : "");
+        map.put("description", item.getDescription() != null ? item.getDescription() : "");
+        return map;
+    }
+
+    private Map<String, String> buildFoundItemMap(FoundItem item) {
+        Map<String, String> map = new HashMap<>();
+        map.put("name", item.getItemName() != null ? item.getItemName() : "");
+        map.put("category", item.getCategoryId() != null ? String.valueOf(item.getCategoryId()) : "");
+        map.put("ocrText", item.getOcrText() != null ? item.getOcrText() : "");
+        map.put("imageUrl", item.getImageUrl() != null ? item.getImageUrl() : "");
+        map.put("location", item.getFoundLocation() != null ? item.getFoundLocation() : "");
+        map.put("time", item.getFoundTime() != null ? item.getFoundTime().toString() : "");
+        map.put("description", item.getDescription() != null ? item.getDescription() : "");
+        return map;
     }
 }

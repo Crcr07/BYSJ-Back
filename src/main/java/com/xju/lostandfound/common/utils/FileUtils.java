@@ -8,40 +8,35 @@ import java.util.UUID;
 public class FileUtils {
 
     /**
-     * 上传文件
-     * @param file 前端传来的文件对象
-     * @param uploadPath 存储的根路径 (从 application.yml 读取)
-     * @return 存储后的文件名 (例如: uuid.jpg)
+     * 将文件保存到服务器本地硬盘
+     * @param file 前端上传的文件
+     * @param path 本地存储路径 (来自 application.yml 中的 campus.file-upload-path)
+     * @return 返回保存后的文件名
      */
-    public static String upload(MultipartFile file, String uploadPath) {
+    public static String upload(MultipartFile file, String path) {
         if (file.isEmpty()) {
-            throw new RuntimeException("上传文件不能为空");
+            return null;
         }
 
-        // 1. 获取原文件名 (例如: photo.jpg)
+        // 1. 确保目录存在
+        File directory = new File(path);
+        if (!directory.exists()) {
+            directory.mkdirs();
+        }
+
+        // 2. 生成不重复的文件名
         String originalFilename = file.getOriginalFilename();
-
-        // 2. 获取文件后缀 (例如: .jpg)
         String suffix = originalFilename.substring(originalFilename.lastIndexOf("."));
-
-        // 3. 生成唯一文件名 (使用 UUID 防止覆盖, 例如: 550e8400-e29b....jpg)
         String fileName = UUID.randomUUID().toString() + suffix;
 
-        // 4. 创建文件对象
-        File dest = new File(uploadPath + fileName);
-
-        // 5. 如果目录不存在，自动创建
-        if (!dest.getParentFile().exists()) {
-            dest.getParentFile().mkdirs();
-        }
-
+        // 3. 保存文件到本地
+        File dest = new File(path + fileName);
         try {
-            // 6. 核心操作：将内存中的文件写入磁盘
             file.transferTo(dest);
-            return fileName; // 返回文件名供数据库存储
+            return fileName;
         } catch (IOException e) {
             e.printStackTrace();
-            throw new RuntimeException("文件上传失败: " + e.getMessage());
+            throw new RuntimeException("本地文件上传失败: " + e.getMessage());
         }
     }
 }

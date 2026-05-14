@@ -1,6 +1,7 @@
 package com.xju.lostandfound.serviceimpl;
 
 import com.baomidou.mybatisplus.extension.service.impl.ServiceImpl;
+import com.xju.lostandfound.common.utils.AliOssUtil; // 🌟 注入 OSS 工具类
 import com.xju.lostandfound.common.utils.FileUtils;
 import com.xju.lostandfound.common.utils.ImageFeatureUtils;
 import com.xju.lostandfound.common.utils.OcrUtils;
@@ -26,19 +27,17 @@ public class FoundItemServiceImpl extends ServiceImpl<FoundItemMapper, FoundItem
     @Autowired
     private OcrUtils ocrUtils;
 
-    // 🌟 注入刚刚写好的智能匹配服务
     @Autowired
     private MatchRecordService matchRecordService;
+
+    @Autowired
+    private AliOssUtil aliOssUtil; // 🌟 注入阿里云 OSS 工具类
 
     @Override
     public boolean publish(PublishItemDto dto, Long userId) {
         String fileName = null;
         File uploadedFile = null;
-
-        if (dto.getFile() != null && !dto.getFile().isEmpty()) {
-            fileName = FileUtils.upload(dto.getFile(), uploadPath);
-            uploadedFile = new File(new File(uploadPath).getAbsoluteFile(), fileName);
-        }
+        String ossUrl = null;
 
         FoundItem foundItem = new FoundItem();
         foundItem.setUserId(userId);
@@ -46,7 +45,25 @@ public class FoundItemServiceImpl extends ServiceImpl<FoundItemMapper, FoundItem
         foundItem.setCategoryId(dto.getCategoryId());
         foundItem.setFoundLocation(dto.getLocation()); // 映射为拾取地点
         foundItem.setDescription(dto.getDescription());
-        foundItem.setImageUrl(fileName);
+
+        // ============================================================
+        // 🌟 修复核心逻辑：调换上传顺序，解决 NoSuchFileException
+        // ============================================================
+        if (dto.getFile() != null && !dto.getFile().isEmpty()) {
+            // 1. 先进行 OSS 上传：此操作通过 getInputStream() 读取流，不会移动或销毁临时文件
+            try {
+                ossUrl = aliOssUtil.upload(dto.getFile());
+                foundItem.setImageUrl(ossUrl); // 将 OSS 返回的完整 URL 存入数据库
+            } catch (Exception e) {
+                // 捕获日志中的上传失败异常
+                throw new RuntimeException("文件上传至阿里云OSS失败", e);
+            }
+
+            // 2. OSS 成功后，再调用 FileUtils 保存到本地副本：用于 OCR 和特征提取
+            // 注意：FileUtils.upload 内部调用 transferTo，之后 Tomcat 的临时文件会被销毁
+            fileName = FileUtils.upload(dto.getFile(), uploadPath);
+            uploadedFile = new File(new File(uploadPath).getAbsoluteFile(), fileName);
+        }
 
         if (dto.getDate() != null && !dto.getDate().isEmpty()) {
             try {
