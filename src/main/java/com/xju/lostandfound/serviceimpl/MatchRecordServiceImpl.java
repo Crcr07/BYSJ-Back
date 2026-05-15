@@ -16,7 +16,6 @@ import org.springframework.scheduling.annotation.Async;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
-import java.time.LocalDateTime;
 import java.util.ArrayList;
 import java.util.List;
 
@@ -47,67 +46,90 @@ public class MatchRecordServiceImpl extends ServiceImpl<MatchRecordMapper, Match
     @Autowired
     private MatchAlgorithmService matchAlgorithmService;
 
-    // 🌟 新增：注入通知服务，用于大模型异步匹配完成后，给用户推送结果！
     @Autowired
     @Lazy
     private NoticeService noticeService;
 
-    @Async // 🌟 核心修改1：标记为异步方法，主线程直接放行，后台慢慢匹配
+    // ==========================================
+    // 🌟 失物发布后触发的异步匹配 (已加入并发优化)
+    // ==========================================
+    @Async
     @Override
     public void matchAfterLostPublished(LostItem lostItem) {
+        // 1. 数据库前置过滤：仅查询“待认领”且“分类一致”的物品
         QueryWrapper<FoundItem> wrapper = new QueryWrapper<>();
         wrapper.eq("status", 0);
+        if (lostItem.getCategoryId() != null) {
+            wrapper.eq("category_id", lostItem.getCategoryId());
+        }
+
         List<FoundItem> foundItems = foundItemMapper.selectList(wrapper);
 
-        System.out.println("【系统触发异步匹配】新发布了失物，正在后台扫描 " + foundItems.size() + " 条招领信息...");
+        System.out.println("【系统触发异步匹配】前置过滤完毕，准备并发扫描 " + foundItems.size() + " 条同类招领信息...");
 
-        for (FoundItem foundItem : foundItems) {
-            MatchRecord record = matchAlgorithmService.calculateMatchScore(lostItem, foundItem);
+        // 2. 开启并行流多线程并发调用大模型接口
+        foundItems.parallelStream().forEach(foundItem -> {
+            try {
+                MatchRecord record = matchAlgorithmService.calculateMatchScore(lostItem, foundItem);
 
-            if (record != null && record.getStatus() != null && record.getStatus() == 0) {
-                this.save(record);
-                System.out.println("💡 发现高度匹配物品！失物ID:" + lostItem.getId() + " 招领ID:" + foundItem.getId());
+                if (record != null && record.getStatus() != null && record.getStatus() == 0) {
+                    this.save(record);
+                    System.out.println("💡 发现高度匹配物品！失物ID:" + lostItem.getId() + " 招领ID:" + foundItem.getId());
 
-                // 🌟 新增：匹配成功后，通过 WebSocket 异步弹出通知给失主
-                noticeService.sendNotice(
-                        lostItem.getUserId(),
-                        "✨ AI智能匹配完成",
-                        "系统为您发布的失物 [" + lostItem.getItemName() + "] 找到了高度疑似物品，请前往【我的智能匹配】确认！",
-                        2
-                );
+                    noticeService.sendNotice(
+                            lostItem.getUserId(),
+                            "✨ AI智能匹配完成",
+                            "系统为您发布的失物 [" + lostItem.getItemName() + "] 找到了高度疑似物品，请前往【我的智能匹配】确认！",
+                            2
+                    );
+                }
+            } catch (Exception e) {
+                System.err.println("并发匹配过程中发生异常，失物ID:" + lostItem.getId() + " 招领ID:" + foundItem.getId() + "，原因：" + e.getMessage());
             }
-        }
-    }
-
-    @Async // 🌟 核心修改2：标记为异步方法
-    @Override
-    public void matchAfterFoundPublished(FoundItem foundItem) {
-        QueryWrapper<LostItem> wrapper = new QueryWrapper<>();
-        wrapper.eq("status", 0);
-        List<LostItem> lostItems = lostItemMapper.selectList(wrapper);
-
-        System.out.println("【系统触发异步匹配】新发布了招领，正在后台扫描 " + lostItems.size() + " 条失物信息...");
-
-        for (LostItem lostItem : lostItems) {
-            MatchRecord record = matchAlgorithmService.calculateMatchScore(lostItem, foundItem);
-
-            if (record != null && record.getStatus() != null && record.getStatus() == 0) {
-                this.save(record);
-                System.out.println("💡 发现高度匹配物品！招领ID:" + foundItem.getId() + " 失物ID:" + lostItem.getId());
-
-                // 🌟 新增：匹配成功后，通过 WebSocket 异步弹出通知给拾取者
-                noticeService.sendNotice(
-                        foundItem.getUserId(),
-                        "✨ AI智能匹配完成",
-                        "系统为您发布的招领 [" + foundItem.getItemName() + "] 找到了疑似失主，请前往【我的智能匹配】确认！",
-                        2
-                );
-            }
-        }
+        });
     }
 
     // ==========================================
-    // 🌟 查询我的匹配记录
+    // 🌟 招领发布后触发的异步匹配 (已加入并发优化)
+    // ==========================================
+    @Async
+    @Override
+    public void matchAfterFoundPublished(FoundItem foundItem) {
+        // 1. 数据库前置过滤
+        QueryWrapper<LostItem> wrapper = new QueryWrapper<>();
+        wrapper.eq("status", 0);
+        if (foundItem.getCategoryId() != null) {
+            wrapper.eq("category_id", foundItem.getCategoryId());
+        }
+
+        List<LostItem> lostItems = lostItemMapper.selectList(wrapper);
+
+        System.out.println("【系统触发异步匹配】前置过滤完毕，准备并发扫描 " + lostItems.size() + " 条同类失物信息...");
+
+        // 2. 开启并行流并发匹配
+        lostItems.parallelStream().forEach(lostItem -> {
+            try {
+                MatchRecord record = matchAlgorithmService.calculateMatchScore(lostItem, foundItem);
+
+                if (record != null && record.getStatus() != null && record.getStatus() == 0) {
+                    this.save(record);
+                    System.out.println("💡 发现高度匹配物品！招领ID:" + foundItem.getId() + " 失物ID:" + lostItem.getId());
+
+                    noticeService.sendNotice(
+                            foundItem.getUserId(),
+                            "✨ AI智能匹配完成",
+                            "系统为您发布的招领 [" + foundItem.getItemName() + "] 找到了疑似失主，请前往【我的智能匹配】确认！",
+                            2
+                    );
+                }
+            } catch (Exception e) {
+                System.err.println("并发匹配过程中发生异常，招领ID:" + foundItem.getId() + " 失物ID:" + lostItem.getId() + "，原因：" + e.getMessage());
+            }
+        });
+    }
+
+    // ==========================================
+    // 查询我的匹配记录
     // ==========================================
     @Override
     public List<MatchRecordVo> getMatchListByUserId(Long userId) {
@@ -149,7 +171,7 @@ public class MatchRecordServiceImpl extends ServiceImpl<MatchRecordMapper, Match
     }
 
     // ==========================================
-    // 🌟 确认认领逻辑 (带事务控制)
+    // 确认认领逻辑 (带事务控制与拾金不昧积分奖励)
     // =========================================
     @Override
     @Transactional(rollbackFor = Exception.class)
@@ -178,7 +200,7 @@ public class MatchRecordServiceImpl extends ServiceImpl<MatchRecordMapper, Match
 
             Long finderUserId = foundItem.getUserId();
 
-            // 防刷分机制
+            // 防刷分机制：若归还者不是失主本人，则给予信用积分奖励
             if (!finderUserId.equals(currentUserId)) {
                 creditRecordService.changeUserCredit(finderUserId, 10, "拾金不昧：成功归还失物");
             }
