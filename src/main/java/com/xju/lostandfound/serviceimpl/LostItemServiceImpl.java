@@ -1,7 +1,7 @@
 package com.xju.lostandfound.serviceimpl;
 
 import com.baomidou.mybatisplus.extension.service.impl.ServiceImpl;
-import com.xju.lostandfound.common.utils.AliOssUtil; // 🌟 注入 OSS 工具类
+import com.xju.lostandfound.common.utils.AliOssUtil;
 import com.xju.lostandfound.common.utils.FileUtils;
 import com.xju.lostandfound.common.utils.ImageFeatureUtils;
 import com.xju.lostandfound.common.utils.OcrUtils;
@@ -17,10 +17,8 @@ import org.springframework.stereotype.Service;
 import java.io.File;
 import java.time.LocalDateTime;
 import java.time.format.DateTimeFormatter;
+import java.util.concurrent.CompletableFuture;
 
-/**
- * 失物业务实现类 - 已修复文件上传顺序问题
- */
 @Service
 public class LostItemServiceImpl extends ServiceImpl<LostItemMapper, LostItem> implements LostItemService {
 
@@ -34,41 +32,25 @@ public class LostItemServiceImpl extends ServiceImpl<LostItemMapper, LostItem> i
     private MatchRecordService matchRecordService;
 
     @Autowired
-    private AliOssUtil aliOssUtil; // 🌟 注入阿里云 OSS 工具类
+    private AliOssUtil aliOssUtil;
 
     @Override
     public boolean publish(PublishItemDto dto, Long userId) {
-        String fileName = null;
-        File uploadedFile = null;
-        String ossUrl = null;
-
+        // 1. 初始化失物实体信息
         LostItem lostItem = new LostItem();
         lostItem.setUserId(userId);
         lostItem.setItemName(dto.getItemName());
         lostItem.setCategoryId(dto.getCategoryId());
         lostItem.setLostLocation(dto.getLocation());
         lostItem.setDescription(dto.getDescription());
+        lostItem.setCreateTime(LocalDateTime.now());
+        lostItem.setStatus(0);
 
-        // ============================================================
-        // 🌟 修复核心逻辑：调换上传顺序，解决 NoSuchFileException
-        // ============================================================
-        if (dto.getFile() != null && !dto.getFile().isEmpty()) {
-            // 1. 先进行 OSS 上传：此操作通过 getInputStream() 读取流，不会移动或销毁临时文件
-            try {
-                ossUrl = aliOssUtil.upload(dto.getFile());
-                lostItem.setImageUrl(ossUrl); // 将 OSS 返回的完整 URL 存入数据库
-            } catch (Exception e) {
-                // 捕获日志中的上传失败异常
-                throw new RuntimeException("文件上传至阿里云OSS失败", e);
-            }
+        // 初始化空特征，防止数据库字段为null引发异常
+        lostItem.setOcrText("");
+        lostItem.setImageFeature("");
 
-            // 2. OSS 成功后，再调用 FileUtils 保存到本地副本：用于 OCR 和特征提取
-            // 注意：FileUtils.upload 内部调用 transferTo，之后 Tomcat 的临时文件会被销毁
-            fileName = FileUtils.upload(dto.getFile(), uploadPath);
-            uploadedFile = new File(new File(uploadPath).getAbsoluteFile(), fileName);
-        }
-
-        // 处理丢失时间格式
+        // 处理时间格式
         if (dto.getDate() != null && !dto.getDate().isEmpty()) {
             try {
                 DateTimeFormatter df = DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm:ss");
@@ -76,36 +58,55 @@ public class LostItemServiceImpl extends ServiceImpl<LostItemMapper, LostItem> i
             } catch (Exception e) {
                 lostItem.setLostTime(LocalDateTime.now());
             }
-        } else {
-            lostItem.setLostTime(LocalDateTime.now());
         }
 
-        lostItem.setCreateTime(LocalDateTime.now());
-        lostItem.setStatus(0);
+        // 2. 处理文件上传（同步执行，因为需要立刻获得图片URL展示给前端）
+        File localFile = null;
+        if (dto.getFile() != null && !dto.getFile().isEmpty()) {
+            try {
+                // 上传至 OSS
+                String ossUrl = aliOssUtil.upload(dto.getFile());
+                lostItem.setImageUrl(ossUrl);
 
-        // 提取图片文字和特征 (基于本地保存的副本进行 AI 处理)
-        if (uploadedFile != null && uploadedFile.exists()) {
-            String text = ocrUtils.doOcr(uploadedFile);
-            String feature = ImageFeatureUtils.getImageFingerprint(uploadedFile);
-
-            System.out.println("====== 毕设算法调试日志 ======");
-            System.out.println("文件绝对路径: " + uploadedFile.getAbsolutePath());
-            System.out.println("OCR 识别结果: [" + text + "]");
-            System.out.println("图像特征指纹: [" + feature + "]");
-            System.out.println("============================");
-
-            lostItem.setOcrText(text == null ? "" : text);
-            lostItem.setImageFeature(feature == null ? "" : feature);
+                // 保存本地临时副本用于后续 AI 提取
+                String fileName = FileUtils.upload(dto.getFile(), uploadPath);
+                localFile = new File(new File(uploadPath).getAbsoluteFile(), fileName);
+            } catch (Exception e) {
+                throw new RuntimeException("文件上传处理失败", e);
+            }
         }
 
-        // ==========================================
-        // 🌟 核心：保存数据库记录并触发智能匹配
-        // ==========================================
+        // 3. 立即保存基础信息到数据库
         boolean isSaved = this.save(lostItem);
+
+        // 4. 🌟 异步处理核心：开启后台线程执行 AI 提取与匹配
         if (isSaved) {
-            matchRecordService.matchAfterLostPublished(lostItem);
+            final File finalFile = localFile; // 匿名内部类引用
+            CompletableFuture.runAsync(() -> {
+                try {
+                    // (1) 在后台执行 OCR 和特征提取 (耗时操作)
+                    if (finalFile != null && finalFile.exists()) {
+                        String text = ocrUtils.doOcr(finalFile);
+                        String feature = ImageFeatureUtils.getImageFingerprint(finalFile);
+
+                        lostItem.setOcrText(text == null ? "" : text);
+                        lostItem.setImageFeature(feature == null ? "" : feature);
+
+                        // (2) 提取完成后更新数据库记录
+                        this.updateById(lostItem);
+                    }
+
+                    // (3) 调用大模型进行异步匹配
+                    matchRecordService.matchAfterLostPublished(lostItem);
+
+                } catch (Exception e) {
+                    System.err.println("后台异步处理任务发生异常: " + e.getMessage());
+                    e.printStackTrace();
+                }
+            });
         }
 
+        // 返回 true，前端会立刻收到响应并跳转页面
         return isSaved;
     }
 }

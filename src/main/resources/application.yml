@@ -52,14 +52,14 @@ campus:
   # 文件路径：src/main/resources/application.yml
 coze:
   api:
-    url: h
-    token: pa  # 请替换为你在 Coze 平台申请的真实 token
+    url: htt
+    token: pat  # 请替换为你在 Coze 平台申请的真实 token
   workflow:
-    id: 7                # 请替换为你真实的工作流 ID
+    id: 75                # 请替换为你真实的工作流 ID
 
 aliyun:
   oss:
-    endpoint: o  # 例如: oss-cn-hangzhou.aliyuncs.com
-    access-key-id: L
+    endpoint: o # 例如: oss-cn-hangzhou.aliyuncs.com
+    access-key-id: LT
     access-key-secret: 2P
-    bucket-name: b
+    bucket-name: by
